@@ -1,0 +1,83 @@
+import openpyxl
+from docx import Document
+from docx2pdf import convert
+from pathlib import Path
+import os
+
+
+def replace_text(doc, key, value):
+    for paragraph in doc.paragraphs:
+        if key in paragraph.text:
+            paragraph.text = paragraph.text.replace(key, value)
+    for table in doc.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                for paragraph in cell.paragraphs:
+                    if key in paragraph.text:
+                        paragraph.text = paragraph.text.replace(key, value)
+
+
+def generate_document(data, template_path, output_path):
+    # It will Load the template document
+    doc = Document(template_path)
+
+    # Replace placeholders in the document
+    for _ in range(2):  # Perform two iterations to ensure all placeholders are replaced
+        for key, value in data.items():
+            replace_text(doc, key, str(value))
+
+    # Save the filled document
+    doc.save(output_path)
+
+
+def generate_documents_from_excel(excel_path, template_path, output_folder):
+    # Load data from Excel
+    workbook = openpyxl.load_workbook(excel_path)
+    sheet = workbook.active
+    data = []
+    for row_num, row in enumerate(sheet.iter_rows(min_row=2, values_only=True), start=2):
+        if len(row) >= 5:  # Check if row has sufficient data
+            data.append({
+                "$Filename$": row[0],
+                "$Name$": row[1],
+                "$Phone$": row[2],
+                "$Email$": row[3],
+                "$Text$": row[4]
+            })
+        else:
+            print(f"Skipping row {row_num}: Insufficient data - {row}")
+
+    # Generate documents
+    output_folder = Path(output_folder)  # Convert to Path object
+    for row_data in data:
+        output_filename = f"{row_data['$Name$']} - Document.docx"
+        output_path = output_folder / output_filename
+        generate_document(row_data, template_path, output_path)
+
+    return len(data)
+
+
+def convert_to_pdf(docx_folder):
+    # Convert DOCX files to PDF
+    convert(docx_folder, docx_folder)
+
+    # Delete the Word files
+    for file in os.listdir(docx_folder):
+        if file.endswith(".docx"):
+            os.remove(os.path.join(docx_folder, file))
+
+
+if __name__ == "__main__":
+
+    excel_path = "data.xlsx"
+    template_path = "template.docx"
+    output_folder = "output"
+    docx_folder = "output"
+
+    # Generate documents from Excel
+    num_documents = generate_documents_from_excel(excel_path, template_path, output_folder)
+    print(f"{num_documents} documents generated successfully.")
+
+    # Convert generated documents to PDF and delete Word files
+    convert_to_pdf(docx_folder)
+    print("Conversion to PDF completed. Word files deleted.")
