@@ -1,0 +1,99 @@
+import pandas as pd
+
+def read_signal_data(filepath):
+    try:
+        data = pd.read_csv(filepath)
+        data['signal_date'] = pd.to_datetime(data['signal_date'])
+        return data
+    except FileNotFoundError:
+        print(f"File '{filepath}' not found.")
+        return None
+    except Exception as e:
+        print(f"Error reading signal data: {e}")
+        return None
+
+
+def read_stock_data(filepath):
+    try:
+        return pd.read_csv(filepath, parse_dates=['datetime']).set_index('datetime')
+    except FileNotFoundError:
+        print(f"File '{filepath}' not found.")
+        return None
+    except Exception as e:
+        print(f"Error reading stock data: {e}")
+        return None
+
+
+def backtest(signal_data, stock_data_list, time_offset):
+    results = []
+    for _, row in signal_data.iterrows():
+        signal_date = pd.to_datetime(row['signal_date']) + pd.Timedelta(hours=time_offset)
+        stock = row['signal_stock']
+        found_data = False
+
+        for stock_data in stock_data_list:
+            if signal_date in stock_data.index:
+                found_data = True
+                entry_date = stock_data.index.searchsorted(signal_date, side='left')
+
+                if entry_date >= len(stock_data):
+                    print(f"No trading data available for signal date: {signal_date}")
+                    continue
+
+                entry_price = stock_data.iloc[entry_date]['close']
+                stop_loss = row['stop_loss']
+                target_price = row['target_price']
+
+                stock_data_after_entry = stock_data.iloc[entry_date:]
+                stop_loss_hit_date = stock_data_after_entry[stock_data_after_entry['low'] < stop_loss].index.min()
+                target_hit_date = stock_data_after_entry[(stock_data_after_entry.index > signal_date) &
+                                                         (stock_data_after_entry['high'] > target_price)].index.min()
+
+                exit_date = stop_loss_hit_date if stop_loss_hit_date is not None and (
+                        target_hit_date is None or stop_loss_hit_date < target_hit_date) else target_hit_date
+                exit_price = stock_data_after_entry.loc[exit_date, 'low' if exit_date == stop_loss_hit_date else 'high']
+                return_pct = ((exit_price - entry_price) / entry_price) * 100 if exit_price is not None else None
+
+                results.append({
+                    'Symbol': stock,
+                    'Entry Date': signal_date,
+                    'Entry Price': entry_price,
+                    'Stop Loss Hit Date': stop_loss_hit_date,
+                    'Target Hit Date': target_hit_date,
+                    'Exit Price': exit_price,
+                    'Return %': return_pct
+                })
+                break
+
+        if not found_data:
+            print(f"No stock data available for signal date: {signal_date}")
+
+    backtesting_results = pd.DataFrame(results)
+    return backtesting_results
+
+
+def main():
+    signal_file = input("Enter the file path for signal data: ")
+    num_stock_files = int(input("Enter the number of stock data files: "))
+    stock_files = [input(f"Enter the file path for stock data {i+1}: ") for i in range(num_stock_files)]
+
+    signal_data = read_signal_data(signal_file)
+    stock_data_list = [read_stock_data(filepath) for filepath in stock_files]
+
+    if signal_data is None or any(stock_data is None for stock_data in stock_data_list):
+        print("Error: Unable to proceed due to missing or invalid data.")
+        return
+
+    time_offset = int(input("Enter the time offset in hours: "))
+
+    backtesting_results = backtest(signal_data, stock_data_list, time_offset)
+
+    if not backtesting_results.empty:
+        output_file = input("Enter the output file path (including .csv extension): ")
+        backtesting_results.to_csv(output_file, index=False)
+        print(f"Backtesting results saved to '{output_file}'.")
+    else:
+        print("No valid backtesting results to save.")
+
+if __name__ == "__main__":
+    main()
